@@ -568,7 +568,17 @@ const patientSchema = new mongoose.Schema({
     age: Number,
     weight: Number,
     height: Number,
-    activity: String, // e.g., "Sedentary", "Active"
+    // 🌟 ADDED FOR METABOLIC MATH 🌟
+    gender: {
+        type: String,
+        enum: ['Male', 'Female'],
+        default: 'Male'
+    },
+    activity: {
+        type: String,
+        enum: ['sedentary', 'slightly active', 'moderately active', 'very active', 'extra active'],
+        default: 'sedentary'
+    },
 
     // weight_history (array of [day, weight])
     weight_history: [{

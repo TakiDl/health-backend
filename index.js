@@ -10561,11 +10561,14 @@ app.put('/patient/:id/profile', async (req, res) => {
         const patient = await Patient.findById(req.params.id);
         if (!patient) return res.status(404).json({ message: "Patient not found" });
 
-        const { name, age, weight, height } = req.body;
+        // 🌟 Added gender and activity to destructured body
+        const { name, age, weight, height, gender, activity } = req.body;
 
         if (name) patient.name = name;
         if (age) patient.age = Number(age);
         if (height) patient.height = Number(height);
+        if (gender) patient.gender = gender;
+        if (activity) patient.activity = activity;
 
         // 🌟 Weight Tracking Logic: If weight changed, log it in history for the chart slope
         if (weight && Number(weight) !== patient.weight) {
@@ -10576,7 +10579,15 @@ app.put('/patient/:id/profile', async (req, res) => {
 
         await patient.save();
 
-        res.json({ message: "Profile updated!", weight: patient.weight, age: patient.age, height: patient.height, name: patient.name });
+        res.json({
+            message: "Profile updated!",
+            weight: patient.weight,
+            age: patient.age,
+            height: patient.height,
+            name: patient.name,
+            gender: patient.gender,
+            activity: patient.activity
+        });
     } catch (error) {
         console.error("Profile Edit Error:", error);
         res.status(500).json({ message: "Server error updating profile." });
