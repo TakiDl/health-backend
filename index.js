@@ -12398,11 +12398,15 @@ app.post('/patient/:id/log-single-product', async (req, res) => {
         const product = await Product.findById(productId);
         if (!product) return res.status(404).json({ message: "Product not found" });
 
+        // 🌟 FIX: Map the mealType to a valid Recipe Category so Mongoose doesn't crash!
+        const catMap = { 'breakfast': 'Breakfast', 'lunch': 'Lunch', 'dinner': 'Dinner', 'snacks': 'Snack' };
+
         const quickRecipe = new Recipe({
             name: `${product['Product Name'] || product.Brand || 'Product'} (${amount}g)`,
+            category: catMap[mealType] || 'Snack', // <-- This prevents the crash!
             preparation_time: "0m",
             difficulty: "Easy",
-            servings: 1, // Single product log defaults to 1
+            servings: 1,
             ingredients: [{
                 product: productId,
                 amount: `${amount}g`
