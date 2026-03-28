@@ -18219,49 +18219,57 @@ app.get('/patient/dashboard/:id', async (req, res) => {
 
         const todayStr = new Date().toDateString();
 
-        // 🌟 "NIGHTLY SNAPSHOT" LOGIC
-        if (patient.last_reset_date && patient.last_reset_date !== todayStr) {
+        // 🌟 "NIGHTLY SNAPSHOT" & PRO PRE-FILL LOGIC
+        if (patient.last_reset_date !== todayStr) {
 
-            let pastKcal = 0, pastPro = 0, pastCarbs = 0, pastFat = 0;
+            // 1. Archive yesterday's data (ONLY if a previous date exists)
+            if (patient.last_reset_date) {
+                let pastKcal = 0, pastPro = 0, pastCarbs = 0, pastFat = 0;
 
-            const calcPastMeals = (mealData) => {
-                if (!mealData) return;
-                const recipes = Array.isArray(mealData) ? mealData : [mealData];
-                recipes.forEach(recipe => {
-                    if (!recipe || !recipe.ingredients) return;
-
-                    const servings = recipe.servings || 1;
-
-                    recipe.ingredients.forEach(item => {
-                        const prod = item.product;
-                        if (prod) {
-                            const numericAmount = parseFloat(String(item.amount || '0').replace(/[^0-9.]/g, '')) || 100;
-                            const multiplier = numericAmount / 100;
-
-                            pastKcal += ((prod['Energy-Kcal'] || 0) * multiplier) / servings;
-                            pastPro += ((prod['Proteins'] || 0) * multiplier) / servings;
-                            pastCarbs += ((prod['Carbohydrates'] || 0) * multiplier) / servings;
-                            pastFat += ((prod['Fat'] || 0) * multiplier) / servings;
-                        }
+                const calcPastMeals = (mealData) => {
+                    if (!mealData) return;
+                    const recipes = Array.isArray(mealData) ? mealData : [mealData];
+                    recipes.forEach(recipe => {
+                        if (!recipe || !recipe.ingredients) return;
+                        const servings = recipe.servings || 1;
+                        recipe.ingredients.forEach(item => {
+                            const prod = item.product;
+                            if (prod) {
+                                const numericAmount = parseFloat(String(item.amount || '0').replace(/[^0-9.]/g, '')) || 100;
+                                const multiplier = numericAmount / 100;
+                                pastKcal += ((prod['Energy-Kcal'] || 0) * multiplier) / servings;
+                                pastPro += ((prod['Proteins'] || 0) * multiplier) / servings;
+                                pastCarbs += ((prod['Carbohydrates'] || 0) * multiplier) / servings;
+                                pastFat += ((prod['Fat'] || 0) * multiplier) / servings;
+                            }
+                        });
                     });
-                });
-            };
+                };
 
-            if (patient.recommended_meals) {
-                calcPastMeals(patient.recommended_meals.breakfast);
-                calcPastMeals(patient.recommended_meals.lunch);
-                calcPastMeals(patient.recommended_meals.dinner);
-                calcPastMeals(patient.recommended_meals.snacks);
+                if (patient.recommended_meals) {
+                    calcPastMeals(patient.recommended_meals.breakfast);
+                    calcPastMeals(patient.recommended_meals.lunch);
+                    calcPastMeals(patient.recommended_meals.dinner);
+                    calcPastMeals(patient.recommended_meals.snacks);
+                }
+
+                const snapshot = {
+                    date: patient.last_reset_date,
+                    kcal: Math.round(pastKcal),
+                    protein: Math.round(pastPro),
+                    carbs: Math.round(pastCarbs),
+                    fat: Math.round(pastFat)
+                };
+
+                if (!patient.historical_logs) patient.historical_logs = [];
+                patient.historical_logs.push(snapshot);
+
+                await Patient.findByIdAndUpdate(patient._id, {
+                    $push: { historical_logs: snapshot }
+                }, { strict: false });
             }
 
-            const snapshot = {
-                date: patient.last_reset_date,
-                kcal: Math.round(pastKcal),
-                protein: Math.round(pastPro),
-                carbs: Math.round(pastCarbs),
-                fat: Math.round(pastFat)
-            };
-
+            // 2. Prepare the fresh slate for today
             const resetData = {
                 "waterIntake": 0,
                 "stepIntake": 0,
@@ -18271,13 +18279,18 @@ app.get('/patient/dashboard/:id', async (req, res) => {
             const daysOfWeek = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
             const currentDay = daysOfWeek[new Date().getDay()]; // e.g., 'saturday'
 
+            // 3. Pre-fill PRO accounts, Empty FREE/PLUS accounts
             if (patient.plan === 'pro' && patient.weekly_plan && patient.weekly_plan[currentDay]) {
-                // 🌟 PRO USERS: Pre-fill "Today's Log" with the Coach's Plan for this specific day!
-                resetData["recommended_meals.breakfast"] = patient.weekly_plan[currentDay].breakfast || [];
-                resetData["recommended_meals.lunch"] = patient.weekly_plan[currentDay].lunch || [];
-                resetData["recommended_meals.dinner"] = patient.weekly_plan[currentDay].dinner || [];
-                resetData["recommended_meals.snacks"] = patient.weekly_plan[currentDay].snacks || [];
 
+                // Helper to safely extract IDs from populated recipe objects
+                const getIds = (mealArray) => (mealArray || []).map(m => m._id || m);
+
+                resetData["recommended_meals.breakfast"] = getIds(patient.weekly_plan[currentDay].breakfast);
+                resetData["recommended_meals.lunch"] = getIds(patient.weekly_plan[currentDay].lunch);
+                resetData["recommended_meals.dinner"] = getIds(patient.weekly_plan[currentDay].dinner);
+                resetData["recommended_meals.snacks"] = getIds(patient.weekly_plan[currentDay].snacks);
+
+                // Keep the fully populated objects in memory so the frontend doesn't crash
                 patient.recommended_meals = {
                     breakfast: patient.weekly_plan[currentDay].breakfast || [],
                     lunch: patient.weekly_plan[currentDay].lunch || [],
@@ -18294,19 +18307,12 @@ app.get('/patient/dashboard/:id', async (req, res) => {
                 patient.recommended_meals = { breakfast: [], lunch: [], dinner: [], snacks: [] };
             }
 
-            await Patient.findByIdAndUpdate(patient._id, {
-                $set: resetData,
-                $push: { historical_logs: snapshot }
-            }, { strict: false });
+            // Push the reset to MongoDB
+            await Patient.findByIdAndUpdate(patient._id, { $set: resetData }, { strict: false });
 
             patient.waterIntake = 0;
             patient.stepIntake = 0;
-
-            if (!patient.historical_logs) patient.historical_logs = [];
-            patient.historical_logs.push(snapshot);
-
-        } else if (!patient.last_reset_date) {
-            await Patient.findByIdAndUpdate(patient._id, { $set: { last_reset_date: todayStr } }, { strict: false });
+            patient.last_reset_date = todayStr;
         }
 
         // --- CALCULATE TODAY'S MACROS (Based on actual consumed logs) ---
