@@ -1,38 +1,3 @@
-// const mongoose = require('mongoose');
-// const Admin = require('./models/Admin'); // Adjust path if your Admin.js is somewhere else
-
-// async function setupAdmin() {
-//     try {
-//         // 1. Connect to your local database
-//         await mongoose.connect('mongodb://127.0.0.1:27017/myApp');
-//         console.log("✅ Connected to MongoDB!");
-
-//         // 2. Prevent creating duplicate admins
-//         const existingAdmin = await Admin.findOne({ username: 'admin123' });
-//         if (existingAdmin) {
-//             console.log("⚠️ Admin already exists in the database.");
-//             process.exit(0);
-//         }
-
-//         // 3. Create the admin data based on your Admin.js schema
-//         const myAdmin = new Admin({
-//             name: "Main Admin",
-//             username: "admin123",
-//             password: "supersecretpassword" // We are using plain text for now
-//         });
-
-//         // 4. Save to the database
-//         await myAdmin.save();
-//         console.log("🎉 Admin account successfully created in MongoDB!");
-
-//     } catch (err) {
-//         console.error("❌ Error creating admin:", err);
-//     } finally {
-//         // 5. Close the database connection so the script finishes
-//         mongoose.connection.close();
-//     }
-// }
-
 // setupAdmin();
 
 const mongoose = require('mongoose');
