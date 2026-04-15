@@ -6576,7 +6576,7 @@ app.put('/expert/:expertId/remove-patient/:patientId', async (req, res) => {
 // ==========================================
 app.get('/payment-requests', async (req, res) => {
     try {
-        const requests = await PaymentRequest.find({ status: 'pending' }).populate('userId', 'name username');
+        const requests = await PaymentRequest.find({ status: 'pending' }).populate('userId', 'name username plan');
         res.json(requests);
     } catch (error) {
         res.status(500).json({ message: "Error fetching requests" });
@@ -6606,7 +6606,7 @@ app.put('/payment-requests/:id/reject', async (req, res) => {
         request.status = 'rejected';
         await request.save();
 
-        res.json({ message: "Payment rejected. Patient stays on Free plan." });
+        res.json({ message: "Payment rejected. Patient stays on their current plan." });
     } catch (error) {
         res.status(500).json({ message: "Error rejecting request", error });
     }
@@ -6635,22 +6635,17 @@ app.get('/admin/statistics', async (req, res) => {
         const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
         patients.forEach(p => {
-            // Count Plans
             if (p.plan) {
                 planDistribution[p.plan] = (planDistribution[p.plan] || 0) + 1;
             } else {
-                planDistribution.free += 1; // Default to free if null
+                planDistribution.free += 1;
             }
 
-            // Count Assigned Patients
-            if (p.assigned_expert) {
-                assignedPatients++;
-            }
+            if (p.assigned_expert) assignedPatients++;
 
-            // Count Dates
             if (p.createdAt) {
                 const date = new Date(p.createdAt);
-                const month = date.getMonth(); // 0-11
+                const month = date.getMonth();
                 const year = date.getFullYear();
 
                 if (year === currentYear) {
@@ -6664,10 +6659,8 @@ app.get('/admin/statistics', async (req, res) => {
             }
         });
 
-        // Calculate Estimated MRR
         const estimatedMRR = (planDistribution.plus * 700) + (planDistribution.pro * 1500);
 
-        // Calculate Expert Breakdown
         let verifiedExperts = 0;
         let pendingExperts = 0;
         experts.forEach(e => {
@@ -6866,6 +6859,7 @@ app.delete('/experts/:id', async (req, res) => {
 // ==========================================
 app.put('/patient/:id/profile', async (req, res) => {
     try {
+        console.log(`[PROFILE] Request to update ${req.params.id}:`, req.body);
         const patient = await Patient.findById(req.params.id);
         if (!patient) return res.status(404).json({ message: "Patient not found" });
 
