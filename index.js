@@ -6714,12 +6714,10 @@ app.put('/patients/:id', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 🌟 FIX: Updated DELETE route to clean up "Ghost IDs" in Expert rosters
 app.delete('/patients/:id', async (req, res) => {
     try {
         const patientId = req.params.id;
 
-        // Before deleting the patient, remove their ID from ALL Experts' rosters and waiting rooms.
         await Expert.updateMany(
             {
                 $or: [
@@ -6735,7 +6733,6 @@ app.delete('/patients/:id', async (req, res) => {
             }
         );
 
-        // Now safely delete the patient
         await Patient.findByIdAndDelete(patientId);
 
         res.json({ message: "Patient deleted successfully and removed from all Expert rosters." });
@@ -6814,7 +6811,6 @@ app.get('/experts', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 🌟 NEW: Fetch specific expert profile for the mobile app
 app.get('/expert/profile/:id', async (req, res) => {
     try {
         const expert = await Expert.findById(req.params.id).select('-password');
@@ -6833,24 +6829,21 @@ app.post('/experts', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// 🌟 UPGRADED: Secure Expert Profile Update (Handles Password Hashing & Duplicate Usernames)
 app.put('/experts/:id', async (req, res) => {
     try {
         const updateData = { ...req.body };
 
-        // Securely handle username change
         if (updateData.username && updateData.username.trim() !== '') {
             const existingUser = await Expert.findOne({ username: updateData.username.trim(), _id: { $ne: req.params.id } });
             if (existingUser) return res.status(400).json({ message: "Username already taken." });
             updateData.username = updateData.username.trim();
         }
 
-        // Securely handle password hashing
         if (updateData.password && updateData.password.trim() !== '') {
             const salt = await bcrypt.genSalt(10);
             updateData.password = await bcrypt.hash(updateData.password.trim(), salt);
         } else {
-            delete updateData.password; // Don't overwrite password if they left the field blank
+            delete updateData.password;
         }
 
         const updatedExpert = await Expert.findByIdAndUpdate(req.params.id, updateData, { new: true }).select('-password');
@@ -6869,18 +6862,15 @@ app.delete('/experts/:id', async (req, res) => {
 
 
 // ==========================================
-// --- 🌟 PATIENT PROFILE UPDATE (FIXED CREDENTIALS!) ---
+// --- 🌟 PATIENT PROFILE UPDATE 🌟 ---
 // ==========================================
 app.put('/patient/:id/profile', async (req, res) => {
     try {
-        console.log(`[PROFILE] Request to update ${req.params.id}:`, req.body);
         const patient = await Patient.findById(req.params.id);
         if (!patient) return res.status(404).json({ message: "Patient not found" });
 
-        // 🌟 EXTRACT ALL FIELDS INCLUDING USERNAME & PASSWORD
         const { name, age, weight, height, gender, activity, daily_budget, email, phone, goal_intention, username, password } = req.body;
 
-        // 🌟 HANDLE USERNAME SECURELY
         if (username && username.trim() !== '') {
             const existingUser = await Patient.findOne({ username: username.trim(), _id: { $ne: req.params.id } });
             if (existingUser) {
@@ -6889,13 +6879,11 @@ app.put('/patient/:id/profile', async (req, res) => {
             patient.username = username.trim();
         }
 
-        // 🌟 HANDLE PASSWORD SECURELY (HASHING)
         if (password && password.trim() !== '') {
             const salt = await bcrypt.genSalt(10);
             patient.password = await bcrypt.hash(password.trim(), salt);
         }
 
-        // 🌟 HANDLE PHYSICAL & PROFILE FIELDS
         if (name) patient.name = name;
         if (age) patient.age = Number(age);
         if (height) patient.height = Number(height);
@@ -6909,14 +6897,13 @@ app.put('/patient/:id/profile', async (req, res) => {
         if (weight && Number(weight) !== patient.weight) {
             patient.weight = Number(weight);
             patient.weight_history.push({ day: new Date(), weight: Number(weight) });
-            console.log(`[PROFILE] Added new weight entry for chart: ${weight}kg`);
         }
 
         await patient.save();
 
         res.json({
             message: "Profile updated!",
-            username: patient.username, // Send back the new username just in case
+            username: patient.username,
             weight: patient.weight,
             age: patient.age,
             height: patient.height,
@@ -6935,30 +6922,38 @@ app.put('/patient/:id/profile', async (req, res) => {
 });
 
 // ==========================================
-// --- EXISTING PATIENT PLAN CHANGE REQUEST ---
+// --- 🌟 UPGRADED: PATIENT PLAN CHANGE REQUEST (WITH RECEIPT) 🌟 ---
 // ==========================================
-app.post('/patient/:id/request-plan', async (req, res) => {
+app.post('/patient/:id/request-plan', upload, async (req, res) => {
     try {
         const { requestedPlan } = req.body;
         const patient = await Patient.findById(req.params.id);
         if (!patient) return res.status(404).json({ message: "Patient not found" });
 
-        // We reuse the PaymentRequest schema. No receipt needed for a simple in-app upgrade/downgrade ping.
+        const receiptFile = req.files && req.files['receipt'] ? req.files['receipt'][0] : null;
+
+        // If they are upgrading to a paid plan, they MUST provide a receipt
+        if ((requestedPlan === 'plus' || requestedPlan === 'pro') && !receiptFile) {
+            return res.status(400).json({ message: "A payment receipt is required to upgrade to Plus or Pro." });
+        }
+
+        const receiptPath = receiptFile ? receiptFile.path.replace(/\\/g, "/") : null;
+
         const newRequest = new PaymentRequest({
             userId: patient._id,
             username: patient.username,
             requestedPlan: requestedPlan,
+            receiptImage: receiptPath,
             status: 'pending'
         });
         await newRequest.save();
 
-        res.json({ message: `Request to change plan to ${requestedPlan} sent!` });
+        res.json({ message: `Request to change plan to ${requestedPlan.toUpperCase()} sent!` });
     } catch (error) {
         console.error("Plan Request Error:", error);
-        res.status(500).json({ error: "Failed to send request" });
+        res.status(500).json({ message: "Failed to send request" });
     }
 });
-
 
 // ==========================================
 // --- PATIENT SET OWN GOALS (PLUS PLAN) ---
