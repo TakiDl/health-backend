@@ -6266,7 +6266,6 @@
 
 
 
-
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -6583,6 +6582,7 @@ app.get('/payment-requests', async (req, res) => {
     }
 });
 
+// 🌟 FIX: Updated Admin Approve Route to auto-remove coach on downgrade
 app.put('/payment-requests/:id/approve', async (req, res) => {
     try {
         const request = await PaymentRequest.findById(req.params.id);
@@ -6591,8 +6591,23 @@ app.put('/payment-requests/:id/approve', async (req, res) => {
         request.status = 'approved';
         await request.save();
 
-        await Patient.findByIdAndUpdate(request.userId, { plan: request.requestedPlan });
-        res.json({ message: "Patient upgraded successfully!" });
+        let updateData = { plan: request.requestedPlan };
+
+        // If the admin approves a downgrade to Free or Plus, the patient loses their Pro Coach.
+        // We MUST remove them from the Expert's active roster to free up space.
+        if (request.requestedPlan === 'free' || request.requestedPlan === 'plus') {
+            const patient = await Patient.findById(request.userId);
+            if (patient && patient.assigned_expert) {
+                await Expert.findByIdAndUpdate(patient.assigned_expert, {
+                    $pull: { supervised_patients: patient._id }
+                });
+            }
+            updateData.assigned_expert = null;
+            updateData.pending_expert = null;
+        }
+
+        await Patient.findByIdAndUpdate(request.userId, updateData);
+        res.json({ message: "Patient plan updated successfully!" });
     } catch (error) {
         res.status(500).json({ message: "Error approving request", error });
     }
@@ -6638,7 +6653,7 @@ app.get('/admin/statistics', async (req, res) => {
             if (p.plan) {
                 planDistribution[p.plan] = (planDistribution[p.plan] || 0) + 1;
             } else {
-                planDistribution.free += 1;
+                planDistribution.free += 1; // Default to free if null
             }
 
             if (p.assigned_expert) assignedPatients++;
@@ -6792,7 +6807,6 @@ app.delete('/products/:id', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-
 // ==========================================
 // --- 🌟 EXPERT CORE & PROFILE ROUTES 🌟 ---
 // ==========================================
@@ -6852,7 +6866,6 @@ app.delete('/experts/:id', async (req, res) => {
         res.json({ message: "Expert deleted!" });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
 
 // ==========================================
 // --- 🌟 PATIENT PROFILE UPDATE 🌟 ---
@@ -6916,7 +6929,7 @@ app.put('/patient/:id/profile', async (req, res) => {
 });
 
 // ==========================================
-// --- 🌟 UPGRADED: PATIENT PLAN CHANGE REQUEST (WITH RECEIPT) 🌟 ---
+// --- 🌟 UPGRADED: PATIENT PLAN CHANGE REQUEST 🌟 ---
 // ==========================================
 app.post('/patient/:id/request-plan', upload, async (req, res) => {
     try {
