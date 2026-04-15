@@ -6308,7 +6308,6 @@ mongoose.connect(dbURI)
     .then(() => console.log("✅ Successfully linked to MongoDB Cloud! ☁️"))
     .catch(err => console.error("❌ MongoDB connection error:", err.message));
 
-
 app.get('/', (req, res) => res.send("Server is working"));
 app.get('/test', (req, res) => res.json({ message: "Test route works", timestamp: new Date() }));
 
@@ -6483,7 +6482,6 @@ app.post('/login', async (req, res) => {
 // ==========================================
 // --- 🤝 ADVANCED MARKETPLACE ROUTES ---
 // ==========================================
-
 app.put('/patient/:id/request-expert', async (req, res) => {
     try {
         const { expertId } = req.body;
@@ -6582,7 +6580,6 @@ app.get('/payment-requests', async (req, res) => {
     }
 });
 
-// 🌟 FIX: Updated Admin Approve Route to auto-remove coach on downgrade
 app.put('/payment-requests/:id/approve', async (req, res) => {
     try {
         const request = await PaymentRequest.findById(req.params.id);
@@ -6593,8 +6590,6 @@ app.put('/payment-requests/:id/approve', async (req, res) => {
 
         let updateData = { plan: request.requestedPlan };
 
-        // If the admin approves a downgrade to Free or Plus, the patient loses their Pro Coach.
-        // We MUST remove them from the Expert's active roster to free up space.
         if (request.requestedPlan === 'free' || request.requestedPlan === 'plus') {
             const patient = await Patient.findById(request.userId);
             if (patient && patient.assigned_expert) {
@@ -6630,7 +6625,6 @@ app.put('/payment-requests/:id/reject', async (req, res) => {
 // ==========================================
 // --- ADMIN CORE ROUTES ---
 // ==========================================
-
 app.get('/admin/statistics', async (req, res) => {
     try {
         const patients = await Patient.find({}, 'plan createdAt assigned_expert');
@@ -6639,7 +6633,7 @@ app.get('/admin/statistics', async (req, res) => {
         const productCount = await Product.countDocuments();
 
         let planDistribution = { free: 0, plus: 0, pro: 0 };
-        let monthlySignups = new Array(12).fill(0); // [Jan, Feb, ... Dec]
+        let monthlySignups = new Array(12).fill(0);
         let yearlySignups = {};
         let recentSignups = { last7Days: 0, last30Days: 0 };
         let assignedPatients = 0;
@@ -6653,7 +6647,7 @@ app.get('/admin/statistics', async (req, res) => {
             if (p.plan) {
                 planDistribution[p.plan] = (planDistribution[p.plan] || 0) + 1;
             } else {
-                planDistribution.free += 1; // Default to free if null
+                planDistribution.free += 1;
             }
 
             if (p.assigned_expert) assignedPatients++;
@@ -6742,7 +6736,6 @@ app.delete('/patients/:id', async (req, res) => {
         );
 
         await Patient.findByIdAndDelete(patientId);
-
         res.json({ message: "Patient deleted successfully and removed from all Expert rosters." });
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -6810,7 +6803,6 @@ app.delete('/products/:id', async (req, res) => {
 // ==========================================
 // --- 🌟 EXPERT CORE & PROFILE ROUTES 🌟 ---
 // ==========================================
-
 app.get('/experts', async (req, res) => {
     try {
         const experts = await Expert.find().populate('supervised_patients', 'name username').select('-password');
@@ -6867,12 +6859,12 @@ app.delete('/experts/:id', async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+
 // ==========================================
 // --- 🌟 PATIENT PROFILE UPDATE 🌟 ---
 // ==========================================
 app.put('/patient/:id/profile', async (req, res) => {
     try {
-        console.log(`[PROFILE] Request to update ${req.params.id}:`, req.body);
         const patient = await Patient.findById(req.params.id);
         if (!patient) return res.status(404).json({ message: "Patient not found" });
 
@@ -6929,7 +6921,7 @@ app.put('/patient/:id/profile', async (req, res) => {
 });
 
 // ==========================================
-// --- 🌟 UPGRADED: PATIENT PLAN CHANGE REQUEST 🌟 ---
+// --- 🌟 FIXED: PATIENT PLAN CHANGE REQUEST (AUTO DOWNGRADE) 🌟 ---
 // ==========================================
 app.post('/patient/:id/request-plan', upload, async (req, res) => {
     try {
@@ -6937,14 +6929,32 @@ app.post('/patient/:id/request-plan', upload, async (req, res) => {
         const patient = await Patient.findById(req.params.id);
         if (!patient) return res.status(404).json({ message: "Patient not found" });
 
+        // 🌟 1. INSTANT DOWNGRADE LOGIC 🌟
+        // If downgrading to free, NO receipt and NO admin approval is required.
+        if (requestedPlan === 'free') {
+            let updateData = { plan: 'free' };
+
+            // If the patient had a coach, remove them from that coach's roster instantly
+            if (patient.assigned_expert) {
+                await Expert.findByIdAndUpdate(patient.assigned_expert, {
+                    $pull: { supervised_patients: patient._id }
+                });
+                updateData.assigned_expert = null;
+                updateData.pending_expert = null;
+            }
+
+            await Patient.findByIdAndUpdate(patient._id, updateData);
+            return res.json({ message: "Plan successfully downgraded to FREE." });
+        }
+
+        // 🌟 2. UPGRADE LOGIC (Requires Receipt & Admin Approval) 🌟
         const receiptFile = req.files && req.files['receipt'] ? req.files['receipt'][0] : null;
 
-        // If they are upgrading to a paid plan, they MUST provide a receipt
-        if ((requestedPlan === 'plus' || requestedPlan === 'pro') && !receiptFile) {
+        if (!receiptFile) {
             return res.status(400).json({ message: "A payment receipt is required to upgrade to Plus or Pro." });
         }
 
-        const receiptPath = receiptFile ? receiptFile.path.replace(/\\/g, "/") : null;
+        const receiptPath = receiptFile.path.replace(/\\/g, "/");
 
         const newRequest = new PaymentRequest({
             userId: patient._id,
@@ -6955,7 +6965,7 @@ app.post('/patient/:id/request-plan', upload, async (req, res) => {
         });
         await newRequest.save();
 
-        res.json({ message: `Request to change plan to ${requestedPlan.toUpperCase()} sent!` });
+        res.json({ message: `Request to change plan to ${requestedPlan.toUpperCase()} sent to Admin!` });
     } catch (error) {
         console.error("Plan Request Error:", error);
         res.status(500).json({ message: "Failed to send request" });
