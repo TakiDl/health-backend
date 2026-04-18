@@ -11375,12 +11375,19 @@ app.get('/admin/statistics', async (req, res) => {
         let recentSignups = { last7Days: 0, last30Days: 0 };
         let assignedPatients = 0;
 
+        // 🌟 NEW: ACTUAL CASH FLOW TRACKERS
+        let actualSalesToday = 0;
+        let actualSalesWeekly = 0;
+        let actualSalesMonthly = 0;
+
         const currentYear = new Date().getFullYear();
         const now = new Date();
-        const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const startOfWeek = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
 
         patients.forEach(p => {
+            // Count Plan Distribution
             if (p.plan) {
                 planDistribution[p.plan] = (planDistribution[p.plan] || 0) + 1;
             } else {
@@ -11400,16 +11407,21 @@ app.get('/admin/statistics', async (req, res) => {
 
                 yearlySignups[year] = (yearlySignups[year] || 0) + 1;
 
-                if (date >= sevenDaysAgo) recentSignups.last7Days++;
-                if (date >= thirtyDaysAgo) recentSignups.last30Days++;
+                if (date >= startOfWeek) recentSignups.last7Days++;
+                if (date >= startOfMonth) recentSignups.last30Days++;
+
+                // 🌟 CALCULATE ACTUAL CASH FLOW (Sales Volume) based on Signup Date
+                if (p.plan === 'plus' || p.plan === 'pro') {
+                    const amount = p.plan === 'pro' ? 1500 : 700;
+                    if (date >= startOfDay) actualSalesToday += amount;
+                    if (date >= startOfWeek) actualSalesWeekly += amount;
+                    if (date >= startOfMonth) actualSalesMonthly += amount;
+                }
             }
         });
 
-        // 🌟 DYNAMIC REVENUE CALCULATIONS 🌟
+        // 🌟 CALCULATE ACTIVE MRR (Monthly Recurring Revenue)
         const estimatedMRR = (planDistribution.plus * 700) + (planDistribution.pro * 1500);
-        const estimatedDailyRevenue = Math.round(estimatedMRR / 30);
-        const estimatedWeeklyRevenue = Math.round(estimatedMRR / 4);
-        const estimatedYearlyRevenue = estimatedMRR * 12;
 
         let verifiedExperts = 0;
         let pendingExperts = 0;
@@ -11431,9 +11443,9 @@ app.get('/admin/statistics', async (req, res) => {
             yearlySignups,
             recentSignups,
             estimatedMRR,
-            estimatedDailyRevenue, // 🌟 New
-            estimatedWeeklyRevenue, // 🌟 New
-            estimatedYearlyRevenue, // 🌟 New
+            actualSalesToday,   // 🌟 Real Money Today
+            actualSalesWeekly,  // 🌟 Real Money This Week
+            actualSalesMonthly, // 🌟 Real Money This Month
             currentYear
         });
     } catch (error) {
